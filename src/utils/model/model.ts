@@ -28,6 +28,8 @@ import { LIGHTNING_BOLT } from '../../constants/figures.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import { type ModelAlias, isModelAlias } from './aliases.js'
 import { capitalize } from '../stringUtils.js'
+import { adapterService } from '../../services/adapterService.js'
+import { isChinaEnvironment, getAdaptedApiEndpoint } from '../china-config.js'
 
 export type ModelShortName = string
 export type ModelName = string

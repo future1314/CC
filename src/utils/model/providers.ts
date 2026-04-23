@@ -1,9 +1,14 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { isChinaEnvironment } from '../china-config.js'
 
-export type APIProvider = 'firstParty' | 'bedrock' | 'vertex' | 'foundry'
+export type APIProvider = 'firstParty' | 'bedrock' | 'vertex' | 'foundry' | 'thirdParty'
 
 export function getAPIProvider(): APIProvider {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_ADAPTER)) {
+    return 'thirdParty'
+  }
+
   return isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
     ? 'bedrock'
     : isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
@@ -29,7 +34,7 @@ export function isFirstPartyAnthropicBaseUrl(): boolean {
   }
   try {
     const host = new URL(baseUrl).host
-    const allowedHosts = ['api.anthropic.com']
+    const allowedHosts = ['api.anthropic.com', 'open.bigmodel.cn']
     if (process.env.USER_TYPE === 'ant') {
       allowedHosts.push('api-staging.anthropic.com')
     }
