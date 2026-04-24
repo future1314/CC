@@ -19,6 +19,7 @@ import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { ThemePicker } from '../ThemePicker.js';
 import { useAppState, useSetAppState, useAppStateStore } from '../../state/AppState.js';
 import { ModelPicker } from '../ModelPicker.js';
+import { ProviderPicker } from '../ProviderPicker.js';
 import { modelDisplayString, isOpus1mMergeEnabled } from '../../utils/model/model.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import { ClaudeMdExternalIncludesDialog } from '../ClaudeMdExternalIncludesDialog.js';
@@ -81,7 +82,7 @@ type Setting = (SettingBase & {
   onChange(value: string): void;
   type: 'managedEnum';
 });
-type SubMenu = 'Theme' | 'Model' | 'TeammateModel' | 'ExternalIncludes' | 'OutputStyle' | 'ChannelDowngrade' | 'Language' | 'EnableAutoUpdates';
+type SubMenu = 'Theme' | 'Model' | 'TeammateModel' | 'ExternalIncludes' | 'OutputStyle' | 'ChannelDowngrade' | 'Language' | 'EnableAutoUpdates' | 'Provider';
 export function Config({
   onClose,
   context,
@@ -813,6 +814,12 @@ export function Config({
     value: mainLoopModel === null ? 'Default (recommended)' : mainLoopModel,
     type: 'managedEnum' as const,
     onChange: onChangeMainModelConfig
+  }, {
+    id: 'provider',
+    label: 'Provider',
+    value: '选择第三方模型提供商',
+    type: 'managedEnum' as const,
+    onChange: () => {}
   }, ...(isConnectedToIde ? [{
     id: 'diffTool',
     label: 'Diff tool',
@@ -1325,6 +1332,10 @@ export function Config({
           setShowSubmenu('Language');
           setTabsHidden(true);
           return;
+        case 'provider':
+          setShowSubmenu('Provider');
+          setTabsHidden(true);
+          return;
       }
     }
     if (setting_0.id === 'autoUpdatesChannel') {
@@ -1580,6 +1591,26 @@ export function Config({
               <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
             </Byline>
           </Text>
+        </> : showSubmenu === 'Provider' ? <>
+          <ProviderPicker onSelect={(providerId, providerName) => {
+            isDirty.current = true;
+            setShowSubmenu(null);
+            setTabsHidden(false);
+            // 激活选中的提供商
+            if (providerId.startsWith('preset-')) {
+              // 预设提供商，需要从配置中获取或使用默认值
+              const providerType = providerId.replace('preset-', '')
+              console.log('Selected preset provider:', providerType)
+            } else {
+              // 自定义提供商，直接激活
+              adapterService.activateProvider(providerId).catch(err => {
+                logError('Failed to activate provider:', err)
+              })
+            }
+          }} onCancel={() => {
+            setShowSubmenu(null);
+            setTabsHidden(false);
+          }} />
         </> : showSubmenu === 'EnableAutoUpdates' ? <Dialog title="Enable Auto-Updates" onCancel={() => {
       setShowSubmenu(null);
       setTabsHidden(false);

@@ -4,7 +4,7 @@
 
 import { getChinaConfig } from '../china-config.js'
 
-export type ThirdPartyProvider = 'ollama' | 'minimax' | 'zhipu'
+export type ThirdPartyProvider = 'ollama' | 'minimax' | 'zhipu' | 'deepseek' | 'kimi' | 'custom'
 
 export interface ThirdPartyModel {
   id: string
@@ -22,6 +22,9 @@ export interface ThirdPartyProviderConfig {
   apiKey?: string
   defaultModel: string
   models: ThirdPartyModel[]
+  supportStream: boolean
+  supportImages: boolean
+  supportsTools: boolean
 }
 
 /**
@@ -35,6 +38,9 @@ export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyP
       name: 'Ollama',
       baseUrl: chinaConfig.apiEndpoints.ollama!,
       defaultModel: chinaConfig.defaultModels.ollama!,
+      supportStream: true,
+      supportImages: true,
+      supportsTools: false,
       models: [
         {
           id: 'qwen2.5:latest',
@@ -70,6 +76,9 @@ export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyP
       baseUrl: chinaConfig.apiEndpoints.minimax!,
       apiKey: process.env.MINIMAX_API_KEY,
       defaultModel: chinaConfig.defaultModels.minimax!,
+      supportStream: true,
+      supportImages: true,
+      supportsTools: true,
       models: [
         {
           id: 'abab6.5-chat',
@@ -105,6 +114,9 @@ export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyP
       baseUrl: chinaConfig.apiEndpoints.zhipu!,
       apiKey: process.env.ZHIPU_API_KEY,
       defaultModel: chinaConfig.defaultModels.zhipu!,
+      supportStream: true,
+      supportImages: false,
+      supportsTools: true,
       models: [
         {
           id: 'glm-4-9b',
@@ -132,6 +144,73 @@ export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyP
           costPer1kInput: 0.0005,
           costPer1kOutput: 0.001,
           description: '智谱 GLM-3-Turbo（更经济）'
+        }
+      ]
+    },
+    deepseek: {
+      name: 'DeepSeek',
+      baseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      defaultModel: process.env.DEEPSEEK_DEFAULT_MODEL || 'deepseek-chat',
+      supportStream: true,
+      supportImages: false,
+      supportsTools: true,
+      models: [
+        {
+          id: 'deepseek-chat',
+          name: 'DeepSeek Chat',
+          provider: 'deepseek',
+          maxTokens: 128000,
+          costPer1kInput: 0.0014,
+          costPer1kOutput: 0.0028,
+          description: 'DeepSeek 对话模型'
+        },
+        {
+          id: 'deepseek-coder',
+          name: 'DeepSeek Coder',
+          provider: 'deepseek',
+          maxTokens: 128000,
+          costPer1kInput: 0.0014,
+          costPer1kOutput: 0.0028,
+          description: 'DeepSeek 代码模型'
+        }
+      ]
+    },
+    kimi: {
+      name: 'Kimi',
+      baseUrl: process.env.KIMI_BASE_URL || 'https://api.moonshot.cn/v1',
+      apiKey: process.env.KIMI_API_KEY,
+      defaultModel: process.env.KIMI_DEFAULT_MODEL || 'moonshot-v1-8k',
+      supportStream: true,
+      supportImages: true,
+      supportsTools: true,
+      models: [
+        {
+          id: 'moonshot-v1-8k',
+          name: 'Kimi 8K',
+          provider: 'kimi',
+          maxTokens: 32768,
+          costPer1kInput: 0.012,
+          costPer1kOutput: 0.012,
+          description: 'Kimi 8K 对话模型（8K上下文）'
+        },
+        {
+          id: 'moonshot-v1-32k',
+          name: 'Kimi 32K',
+          provider: 'kimi',
+          maxTokens: 32768,
+          costPer1kInput: 0.024,
+          costPer1kOutput: 0.024,
+          description: 'Kimi 32K 对话模型（32K上下文）'
+        },
+        {
+          id: 'moonshot-v1-128k',
+          name: 'Kimi 128K',
+          provider: 'kimi',
+          maxTokens: 128000,
+          costPer1kInput: 0.06,
+          costPer1kOutput: 0.06,
+          description: 'Kimi 128K 对话模型（128K上下文）'
         }
       ]
     }
