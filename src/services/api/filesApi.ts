@@ -17,7 +17,7 @@ import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import { sleep } from '../../utils/sleep.js'
-import { ConcurrencyLimiter } from '../../utils/concurrency.js'
+import { ConcurrencyLimiter, createRateLimiter } from '../../utils/concurrency.js'
 import { AdvancedLogger } from '../../utils/advancedLog.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -163,40 +163,37 @@ export async function downloadFile(
           const response = await axios.get(url, {
             headers,
             responseType: 'arraybuffer',
-            timeout: 60000, // 60 second timeout for large files        validateStatus: status => status < 500,
+            timeout: 60000, // 60 second timeout for large files
+          })
+
+          if (response.status === 200) {
+            logDebug(`Downloaded file ${fileId} (${response.data.length} bytes)`)
+            return { done: true, value: Buffer.from(response.data) }
+          }
+
+          // Non-retriable errors - throw immediately
+          if (response.status === 404) {
+            throw new Error(`File not found: ${fileId}`)
+          }
+          if (response.status === 401) {
+            throw new Error('Authentication failed: invalid or missing API key')
+          }
+          if (response.status === 403) {
+            throw new Error(`Access denied to file: ${fileId}`)
+          }
+
+          throw new Error(`Unexpected response status: ${response.status}`)
+        } catch (error) {
+          if (!axios.isAxiosError(error)) {
+            throw error
+          }
+          return { done: false, error: error.message }
+        }
       })
-
-      if (response.status === 200) {
-        logDebug(`Downloaded file ${fileId} (${response.data.length} bytes)`)
-        return { done: true, value: Buffer.from(response.data) }
-      }
-
-      // Non-retriable errors - throw immediately
-      if (response.status === 404) {
-        throw new Error(`File not found: ${fileId}`)
-      }
-      if (response.status === 401) {
-        throw new Error('Authentication failed: invalid or missing API key')
-      }
-      if (response.status === 403) {
-        throw new Error(`Access denied to file: ${fileId}`)
-      }
-
-      return { done: false, error: `status ${response.status}` }
-    } catch (error) {
-      if (!axios.isAxiosError(error)) {
-        throw error
-      }
-      return { done: false, error: error.message }
-    }
+    })
   })
 }
 
-/**
- * Normalizes a relative path, strips redundant prefixes, and builds the full
- * download path under {basePath}/{session_id}/uploads/.
- * Returns null if the path is invalid (e.g., path traversal).
- */
 export function buildDownloadPath(
   basePath: string,
   sessionId: string,
@@ -217,6 +214,11 @@ export function buildDownloadPath(
   ]
   const matchedPrefix = redundantPrefixes.find(p => normalized.startsWith(p))
   const cleanPath = matchedPrefix
+    ? normalized.replace(matchedPrefix, '')
+    : normalized
+  return path.join(uploadsBase, cleanPath)
+}
+
 export async function downloadAndSaveFile(
   fileId: string,
   config: FilesApiConfig,
@@ -235,45 +237,11 @@ export async function downloadAndSaveFile(
   monitor.end();
   monitor.log();
   logger.info(`File downloaded and saved to ${outputPath}`);
-}      fileId,
-      path: '',
-      success: false,
-      error: `Invalid file path: ${relativePath}`,
-    }
-  }
+}
 
-  try {
-    // Download the file content
-    const content = await downloadFile(fileId, config)
-
-    // Ensure the parent directory exists
-    const parentDir = path.dirname(fullPath)
-    await fs.mkdir(parentDir, { recursive: true })
-
-    // Write the file
-    await fs.writeFile(fullPath, content)
-
-    logDebug(`Saved file ${fileId} to ${fullPath} (${content.length} bytes)`)
-
-    return {
-      fileId,
-      path: fullPath,
-      success: true,
-      bytesWritten: content.length,
-    }
-  } catch (error) {
-    logDebugError(`Failed to download file ${fileId}: ${errorMessage(error)}`)
-    if (error instanceof Error) {
-      logError(error)
-    }
-
-    return {
-      fileId,
-      path: fullPath,
-      success: false,
-      error: errorMessage(error),
-    }
-  }
+async function downloadFile(fileId: string, config: FilesApiConfig): Promise<Uint8Array> {
+  // Implementation would go here
+  throw new Error('Not implemented')
 }
 
 // Default concurrency limit for parallel downloads

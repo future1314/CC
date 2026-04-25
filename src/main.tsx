@@ -8,7 +8,7 @@
 //    (~65ms on every macOS startup)
 import { profileCheckpoint, profileReport } from './utils/startupProfiler.js';
 import { wrapAsync } from './utils/errors.js';
-import { AdvancedLogger } from './utils/advancedLog.js';
+import { AdvancedLogger, LogLevel } from './utils/advancedLog.js';
 
 // Initialize advanced logger
 const logger = AdvancedLogger.getInstance();
@@ -18,13 +18,14 @@ logger.setLogLevel(LogLevel.INFO);
 profileCheckpoint('main_tsx_entry');
 
 // Run MDM and keychain reads in parallel to reduce startup time
-const [mdmData, keychainData] = await Promise.all([
+await Promise.all([
   wrapAsync(() => import('./utils/settings/mdm/rawRead.js').then(m => m.startMdmRawRead())),
   wrapAsync(() => import('./utils/secureStorage/keychainPrefetch.js').then(k => k.startKeychainPrefetch()))
 ]);
 
 // Wait for keychain data to be ready
-await keychainData.ensureKeychainPrefetchCompleted();
+const { ensureKeychainPrefetchCompleted } = await import('./utils/secureStorage/keychainPrefetch.js');
+await ensureKeychainPrefetchCompleted();
 import { feature } from 'bun:bundle';
 import { Command as CommanderCommand, InvalidArgumentError, Option } from '@commander-js/extra-typings';
 import chalk from 'chalk';
