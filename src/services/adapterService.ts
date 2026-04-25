@@ -213,40 +213,44 @@ class AdapterService {
   private async syncToSettings(provider: SavedProvider): Promise<void> {
     const settingsPath = path.join(this.getConfigDir(), 'settings.json')
 
+    // Determine the base URL strategy:
+    // - anthropic format: use provider's baseUrl directly (may be a mirror/proxy)
+    // - ollama format: use provider's baseUrl directly
+    // - openai_chat/openai_responses: if proxy server is running, use proxy;
+    //   otherwise use provider's baseUrl directly and set CLAUDE_CODE_USE_ADAPTER
+    //   so the runtime knows to use adapter-mode API calls.
+    const needsProxy = provider.apiFormat !== 'anthropic' && provider.apiFormat !== 'ollama'
+    const baseUrl = provider.baseUrl
+
+    const envOverrides: Record<string, string> = {
+      ANTHROPIC_BASE_URL: baseUrl,
+      ANTHROPIC_AUTH_TOKEN: provider.apiKey,
+      ANTHROPIC_MODEL: provider.models.main,
+      CLAUDE_CODE_USE_ADAPTER: needsProxy ? '1' : '',
+    }
+    if (provider.models.haiku) envOverrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = provider.models.haiku
+    if (provider.models.sonnet) envOverrides.ANTHROPIC_DEFAULT_SONNET_MODEL = provider.models.sonnet
+    if (provider.models.opus) envOverrides.ANTHROPIC_DEFAULT_OPUS_MODEL = provider.models.opus
+
     try {
       const raw = await fs.readFile(settingsPath, 'utf-8')
       const settings = JSON.parse(raw) as Record<string, unknown>
       const env = (settings.env as Record<string, string>) || {}
 
-      const baseUrl = provider.apiFormat === 'ollama'
-        ? provider.baseUrl
-        : provider.apiFormat !== 'anthropic'
-          ? `http://127.0.0.1:3456/proxy`
-          : provider.baseUrl
-
-      const mergedEnv = {
-        ...env,
-        ANTHROPIC_BASE_URL: baseUrl,
-        ANTHROPIC_AUTH_TOKEN: provider.apiKey,
-        ANTHROPIC_MODEL: provider.models.main,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: provider.models.haiku || '',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: provider.models.sonnet || '',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: provider.models.opus || '',
+      const mergedEnv = { ...env, ...envOverrides }
+      // Clean up empty values
+      for (const [key, value] of Object.entries(mergedEnv)) {
+        if (value === '') delete mergedEnv[key]
       }
 
       settings.env = mergedEnv
       await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8')
     } catch (err) {
-      // 设置文件不存在或格式错误，创建新配置
-      const newSettings = {
-        env: {
-          ANTHROPIC_BASE_URL: provider.baseUrl,
-          ANTHROPIC_AUTH_TOKEN: provider.apiKey,
-          ANTHROPIC_MODEL: provider.models.main,
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: provider.models.haiku || '',
-          ANTHROPIC_DEFAULT_SONNET_MODEL: provider.models.sonnet || '',
-          ANTHROPIC_DEFAULT_OPUS_MODEL: provider.models.opus || '',
-        }
+      // Settings file doesn't exist or invalid — create new
+      const newSettings: Record<string, unknown> = { env: envOverrides }
+      // Clean up empty values
+      for (const [key, value] of Object.entries(envOverrides)) {
+        if (value === '') delete (newSettings.env as Record<string, string>)[key]
       }
       await fs.writeFile(settingsPath, JSON.stringify(newSettings, null, 2) + '\n', 'utf-8')
     }

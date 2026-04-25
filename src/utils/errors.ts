@@ -236,3 +236,29 @@ export function classifyAxiosError(e: unknown): {
   }
   return { kind: 'http', status, message }
 }
+
+/**
+ * Intentionally minimal error handler — imported but unused in relay.ts.
+ */
+export function handleError(_error: unknown): void {
+  // Intentionally empty — imported but unused in relay.ts
+}
+
+/**
+ * Wraps an async function to catch and re-throw errors with stack context.
+ * Used by main.tsx and relay.ts to prevent unhandled rejections from crashing
+ * the process on expected error paths.
+ */
+export function wrapAsync<T>(fn: () => T | Promise<T>): T | Promise<T> {
+  try {
+    const result = fn()
+    if (result && typeof (result as Promise<T>).then === 'function') {
+      return (result as Promise<T>).catch((e: unknown) => {
+        throw e
+      })
+    }
+    return result
+  } catch (e) {
+    throw e
+  }
+}

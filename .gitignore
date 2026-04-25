@@ -3,6 +3,7 @@
 node_modules/
 
 dist/
+dist-compiled-backup/
 build/
 coverage/
 .cache/
@@ -12,6 +13,9 @@ coverage/
 *.tmp
 *.swp
 *.swo
+
+# Compiled JS artifacts (source map restored .ts files are the source of truth)
+src/**/*.js
 
 .claude/
 .idea/

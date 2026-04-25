@@ -32,6 +32,7 @@ import {
 } from './model.js'
 import { has1mContext } from '../context.js'
 import { getGlobalConfig } from '../config.js'
+import { getThirdPartyProviders, getAllThirdPartyModels, isThirdPartyModel, shouldShowThirdPartyModels } from './third-party.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 
@@ -323,6 +324,11 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return standardOptions
   }
 
+  // Third-party / China environment: show third-party models alongside Anthropic models
+  if (shouldShowThirdPartyModels()) {
+    return getThirdPartyModelOptions(fastMode)
+  }
+
   // PAYG 1P API: Default (Sonnet) + Sonnet 1M + Opus 4.6 + Opus 1M + Haiku
   if (getAPIProvider() === 'firstParty') {
     const payg1POptions = [getDefaultOptionForUser(fastMode)]
@@ -522,6 +528,81 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     }
     return filterModelOptionsByAllowlist(options)
   }
+}
+
+/**
+ * Build model options for third-party / China environment.
+ * Shows third-party models (Ollama, DeepSeek, MiniMax, Zhipu, Kimi)
+ * alongside Anthropic models when in adapter mode or China environment.
+ */
+function getThirdPartyModelOptions(_fastMode = false): ModelOption[] {
+  const options: ModelOption[] = [
+    getDefaultOptionForUser(_fastMode),
+  ]
+
+  // Add Anthropic model options (standard set, minus pricing since 3P users don't pay Anthropic)
+  try {
+    const is3P = getAPIProvider() !== 'firstParty'
+
+    // Sonnet
+    const customSonnet = getCustomSonnetOption()
+    if (customSonnet !== undefined) {
+      options.push(customSonnet)
+    } else {
+      options.push(getSonnet46Option())
+    }
+
+    // Opus
+    const customOpus = getCustomOpusOption()
+    if (customOpus !== undefined) {
+      options.push(customOpus)
+    } else {
+      options.push(getOpus46Option(_fastMode))
+    }
+
+    // Haiku
+    const customHaiku = getCustomHaikuOption()
+    if (customHaiku !== undefined) {
+      options.push(customHaiku)
+    } else {
+      options.push(getHaikuOption())
+    }
+  } catch {
+    // If Anthropic option construction fails, skip them
+  }
+
+  // Add third-party provider models
+  try {
+    const thirdPartyProviders = getThirdPartyProviders()
+    const allModels = getAllThirdPartyModels()
+
+    for (const [providerId, providerConfig] of Object.entries(thirdPartyProviders)) {
+      const providerModels = allModels.filter(m => m.provider === providerId)
+      for (const model of providerModels) {
+        const costInfo = model.costPer1kInput || model.costPer1kOutput
+          ? ` · ¥${model.costPer1kInput}/${model.costPer1kOutput} per 1K tokens`
+          : model.costPer1kInput === 0 ? ' · 免费' : ''
+
+        options.push({
+          value: model.id,
+          label: `${model.name}`,
+          description: `${providerConfig.name} · ${model.description || model.id}${costInfo}`,
+        })
+      }
+    }
+  } catch {
+    // If third-party config fails to load, fall back to showing a custom model option
+    const currentModel = process.env.ANTHROPIC_MODEL
+    if (currentModel) {
+      options.push({
+        value: currentModel,
+        label: currentModel,
+        description: 'Current custom model (third-party config unavailable)',
+      })
+    }
+  }
+
+  return options
 }
 
 /**

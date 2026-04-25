@@ -1,8 +1,15 @@
 /**
  * 第三方模型配置支持
+ *
+ * 支持两种模式：
+ * 1. adapter 模式（CLAUDE_CODE_USE_ADAPTER=1）：通过 adapterService 管理 provider
+ * 2. 环境变量模式：通过 ANTHROPIC_BASE_URL 等环境变量配置（中国用户常用）
+ *
+ * 在中国环境下（isChinaEnvironment()），即使未设置 CLAUDE_CODE_USE_ADAPTER，
+ * 也会自动在 ModelPicker 中显示第三方模型选项。
  */
 
-import { getChinaConfig } from '../china-config.js'
+import { getChinaConfig, isChinaEnvironment } from '../china-config.js'
 
 export type ThirdPartyProvider = 'ollama' | 'minimax' | 'zhipu' | 'deepseek' | 'kimi' | 'custom'
 
@@ -27,10 +34,113 @@ export interface ThirdPartyProviderConfig {
   supportsTools: boolean
 }
 
+// Cache for adapter-configured models (loaded from ~/.claude/claude-code-adapters.json)
+let adapterModelsCache: ThirdPartyModel[] | null = null
+
 /**
- * 获取第三方模型配置
+ * Load models from adapter config file (if it exists).
+ * This supplements the hardcoded third-party models with user-configured providers.
  */
-export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyProviderConfig> {
+async function loadAdapterModels(): Promise<ThirdPartyModel[]> {
+  if (adapterModelsCache) return adapterModelsCache
+
+  try {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const os = await import('os')
+    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+    const indexPath = path.join(configDir, 'claude-code-adapters.json')
+    const raw = await fs.readFile(indexPath, 'utf-8')
+    const index = JSON.parse(raw) as {
+      activeId: string | null
+      providers: Array<{
+        id: string
+        name: string
+        baseUrl: string
+        apiFormat: string
+        models: { main: string; haiku?: string; sonnet?: string; opus?: string }
+      }>
+    }
+
+    const models: ThirdPartyModel[] = []
+    for (const provider of index.providers) {
+      // Add main model
+      if (provider.models.main) {
+        models.push({
+          id: provider.models.main,
+          name: provider.models.main,
+          provider: 'custom' as ThirdPartyProvider,
+          description: `${provider.name} (via adapter)`,
+        })
+      }
+      // Add other models if configured
+      for (const [key, modelId] of Object.entries(provider.models)) {
+        if (modelId && key !== 'main' && !models.some(m => m.id === modelId)) {
+          models.push({
+            id: modelId,
+            name: modelId,
+            provider: 'custom' as ThirdPartyProvider,
+            description: `${provider.name} ${key} (via adapter)`,
+          })
+        }
+      }
+    }
+
+    adapterModelsCache = models
+    return models
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Synchronous version for isThirdPartyModel (uses hardcoded list + env vars only).
+ * For full adapter model check, use isThirdPartyModelAsync().
+ */
+export function isThirdPartyModel(modelId: string): boolean {
+  // Check env vars for custom models
+  const envModels = [
+    process.env.ANTHROPIC_MODEL,
+    process.env.ANTHROPIC_CUSTOM_MODEL_OPTION,
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+  ].filter(Boolean)
+
+  if (envModels.includes(modelId)) {
+    // If ANTHROPIC_BASE_URL is set to a non-Anthropic endpoint, it's third-party
+    const baseUrl = process.env.ANTHROPIC_BASE_URL || ''
+    const anthropicHosts = ['api.anthropic.com', 'open.bigmodel.cn']
+    const isAnthropicHost = anthropicHosts.some(h => baseUrl.includes(h))
+    if (baseUrl && !isAnthropicHost) {
+      return true
+    }
+  }
+
+  // Check hardcoded provider models
+  const providers = getThirdPartyProvidersSync()
+  for (const provider of Object.values(providers)) {
+    if (provider.models.some(m => m.id === modelId)) {
+      return true
+    }
+  }
+
+  // Non-Anthropic model IDs are likely third-party
+  if (modelId && !modelId.startsWith('claude-')) {
+    // But skip known aliases
+    const knownAliases = ['sonnet', 'opus', 'haiku', 'best', 'fast']
+    if (!knownAliases.includes(modelId.toLowerCase().split('[')[0])) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Get hardcoded third-party provider configs (synchronous).
+ */
+function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProviderConfig> {
   const chinaConfig = getChinaConfig()
 
   return {
@@ -173,6 +283,15 @@ export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyP
           costPer1kInput: 0.0014,
           costPer1kOutput: 0.0028,
           description: 'DeepSeek 代码模型'
+        },
+        {
+          id: 'deepseek-reasoner',
+          name: 'DeepSeek Reasoner',
+          provider: 'deepseek',
+          maxTokens: 128000,
+          costPer1kInput: 0.004,
+          costPer1kOutput: 0.016,
+          description: 'DeepSeek 推理模型（R1）'
         }
       ]
     },
@@ -218,6 +337,35 @@ export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyP
 }
 
 /**
+ * 获取第三方模型配置
+ */
+export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyProviderConfig> {
+  return getThirdPartyProvidersSync()
+}
+
+/**
+ * Check if third-party models should be shown in the model picker.
+ * True when:
+ * - CLAUDE_CODE_USE_ADAPTER=1 (explicit adapter mode), OR
+ * - In China environment (auto-detect), OR
+ * - ANTHROPIC_BASE_URL points to a non-Anthropic endpoint
+ */
+export function shouldShowThirdPartyModels(): boolean {
+  if (process.env.CLAUDE_CODE_USE_ADAPTER === '1') return true
+  if (isChinaEnvironment()) return true
+
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || ''
+  if (baseUrl) {
+    const anthropicHosts = ['api.anthropic.com', 'open.bigmodel.cn']
+    if (!anthropicHosts.some(h => baseUrl.includes(h))) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
  * 根据模型ID获取模型信息
  */
 export function getModelById(modelId: string): ThirdPartyModel | undefined {
@@ -231,21 +379,6 @@ export function getModelById(modelId: string): ThirdPartyModel | undefined {
   }
 
   return undefined
-}
-
-/**
- * 检查模型是否为第三方模型
- */
-export function isThirdPartyModel(modelId: string): boolean {
-  const providers = getThirdPartyProviders()
-
-  for (const provider of Object.values(providers)) {
-    if (provider.models.some(m => m.id === modelId)) {
-      return true
-    }
-  }
-
-  return false
 }
 
 /**

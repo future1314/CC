@@ -10,6 +10,7 @@ import {
   AuthenticationError,
 } from '@anthropic-ai/sdk'
 import { getModelStrings } from './modelStrings.js'
+import { isThirdPartyModel, shouldShowThirdPartyModels } from './third-party.js'
 
 // Cache valid models to avoid repeated API calls
 const validModelCache = new Map<string, boolean>()
@@ -48,6 +49,20 @@ export async function validateModel(
 
   // Check cache first
   if (validModelCache.has(normalizedModel)) {
+    return { valid: true }
+  }
+
+  // Skip API validation for known third-party models (they use different APIs)
+  // Also skip for any non-claude model when in third-party/China mode
+  // (the user is responsible for providing correct model names)
+  if (isThirdPartyModel(normalizedModel)) {
+    validModelCache.set(normalizedModel, true)
+    return { valid: true }
+  }
+  // When in third-party/China mode, skip validation for any non-Anthropic model
+  // (Anthropic models still get validated normally)
+  if (shouldShowThirdPartyModels() && !normalizedModel.toLowerCase().startsWith('claude-')) {
+    validModelCache.set(normalizedModel, true)
     return { valid: true }
   }
 

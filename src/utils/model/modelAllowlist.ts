@@ -2,6 +2,8 @@ import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { isModelAlias, isModelFamilyAlias } from './aliases.js'
 import { parseUserSpecifiedModel } from './model.js'
 import { resolveOverriddenModel } from './modelStrings.js'
+import { isThirdPartyModel, shouldShowThirdPartyModels } from './third-party.js'
+import { getAPIProvider } from './providers.js'
 
 /**
  * Check if a model belongs to a given family by checking if its name
@@ -98,6 +100,11 @@ function familyHasSpecificEntries(
  * 3. Full model IDs ("claude-opus-4-5-20251101") — exact match only
  */
 export function isModelAllowed(model: string): boolean {
+  // Third-party models are always allowed when in adapter/China mode
+  if (shouldShowThirdPartyModels() && isThirdPartyModel(model)) {
+    return true
+  }
+
   const settings = getSettings_DEPRECATED() || {}
   const { availableModels } = settings
   if (!availableModels) {

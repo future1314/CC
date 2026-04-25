@@ -1,16 +1,15 @@
-import { createMovedToPluginCommand } from '../createMovedToPluginCommand.js'
-
+import { createMovedToPluginCommand } from '../createMovedToPluginCommand.ts';
 export default createMovedToPluginCommand({
-  name: 'pr-comments',
-  description: 'Get comments from a GitHub pull request',
-  progressMessage: 'fetching PR comments',
-  pluginName: 'pr-comments',
-  pluginCommand: 'pr-comments',
-  async getPromptWhileMarketplaceIsPrivate(args) {
-    return [
-      {
-        type: 'text',
-        text: `You are an AI assistant integrated into a git-based version control system. Your task is to fetch and display comments from a GitHub pull request.
+    name: 'pr-comments',
+    description: 'Get comments from a GitHub pull request',
+    progressMessage: 'fetching PR comments',
+    pluginName: 'pr-comments',
+    pluginCommand: 'pr-comments',
+    async getPromptWhileMarketplaceIsPrivate(args) {
+        return [
+            {
+                type: 'text',
+                text: `You are an AI assistant integrated into a git-based version control system. Your task is to fetch and display comments from a GitHub pull request.
 
 Follow these steps:
 
@@ -44,7 +43,7 @@ Remember:
 
 ${args ? 'Additional user input: ' + args : ''}
 `,
-      },
-    ]
-  },
-})
+            },
+        ];
+    },
+});

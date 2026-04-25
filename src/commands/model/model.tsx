@@ -15,6 +15,7 @@ import { checkOpus1mAccess, checkSonnet1mAccess } from '../../utils/model/check1
 import { getDefaultMainLoopModelSetting, isOpus1mMergeEnabled, renderDefaultModelSetting } from '../../utils/model/model.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { validateModel } from '../../utils/model/validateModel.js';
+import { isThirdPartyModel } from '../../utils/model/third-party.js';
 function ModelPickerWrapper(t0) {
   const $ = _c(17);
   const {
@@ -201,6 +202,16 @@ function SetModelAndClose({
         mainLoopModel: modelValue,
         mainLoopModelForSession: null
       }));
+      // Persist third-party model selection to settings so it survives restart
+      if (modelValue && isThirdPartyModel(modelValue)) {
+        try {
+          const { updateSettingsForSource } = require('../../utils/settings/settings.js');
+          const settings = { env: { ANTHROPIC_MODEL: modelValue } };
+          updateSettingsForSource('user', settings, 'model_change');
+        } catch {
+          // Settings persistence failed — model still works for this session
+        }
+      }
       let message = `Set model to ${chalk.bold(renderModelLabel(modelValue))}`;
       let wasFastModeToggledOn = undefined;
       if (isFastModeEnabled()) {
