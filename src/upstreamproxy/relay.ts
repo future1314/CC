@@ -20,6 +20,8 @@ import { createServer, type Socket as NodeSocket } from 'node:net'
 import { logForDebugging } from '../utils/debug.js'
 import { getWebSocketTLSOptions } from '../utils/mtls.js'
 import { getWebSocketProxyAgent, getWebSocketProxyUrl } from '../utils/proxy.js'
+import { memoizeAsync } from '../utils/performance.js'
+import { handleError, wrapAsync } from '../utils/errors.js'
 
 // The CCR container runs behind an egress gateway — direct outbound is
 // blocked, so the WS upgrade must go through the same HTTP CONNECT proxy
@@ -30,6 +32,12 @@ import { getWebSocketProxyAgent, getWebSocketProxyUrl } from '../utils/proxy.js'
 // openTunnel stays synchronous and the CONNECT state machine doesn't race.
 type WSCtor = typeof import('ws').default
 let nodeWSCtor: WSCtor | undefined
+
+// Cache for WebSocket constructor to avoid repeated imports
+import { memoizeAsync } from '../utils/performance.js';
+const getWebSocketConstructor = memoizeAsync(async () => {
+  return (await import('ws')).default as WSCtor;
+});
 
 // Intersection of the surface openTunnel touches. Both undici's
 // globalThis.WebSocket and the ws package satisfy this via property-style
@@ -152,25 +160,36 @@ function newConnState(): ConnState {
  * Uses Bun.listen when available, otherwise Node's net.createServer — the CCR
  * container runs the CLI under Node, not Bun.
  */
+import { measurePerformance, createPerformanceMonitor } from '../utils/performance.js';
+import { AdvancedLogger } from '../utils/advancedLog.js';
+
 export async function startUpstreamProxyRelay(opts: {
   wsUrl: string
   sessionId: string
   token: string
 }): Promise<UpstreamProxyRelay> {
-  const authHeader =
-    'Basic ' + Buffer.from(`${opts.sessionId}:${opts.token}`).toString('base64')
-  // WS upgrade itself is auth-gated (proto authn: PRIVATE_API) — the gateway
-  // wants the session-ingress JWT on the upgrade request, separate from the
-  // Proxy-Authorization that rides inside the tunneled CONNECT.
-  const wsAuthHeader = `Bearer ${opts.token}`
+  const logger = AdvancedLogger.getInstance();
+  const monitor = createPerformanceMonitor('startUpstreamProxyRelay');
 
-  const relay =
-    typeof Bun !== 'undefined'
-      ? startBunRelay(opts.wsUrl, authHeader, wsAuthHeader)
-      : await startNodeRelay(opts.wsUrl, authHeader, wsAuthHeader)
+  return wrapAsync(async () => {
+    monitor.start();
+    const authHeader =
+      'Basic ' + Buffer.from(`${opts.sessionId}:${opts.token}`).toString('base64')
+    // WS upgrade itself is auth-gated (proto authn: PRIVATE_API) — the gateway
+    // wants the session-ingress JWT on the upgrade request, separate from the
+    // Proxy-Authorization that rides inside the tunneled CONNECT.
+    const wsAuthHeader = `Bearer ${opts.token}`
 
-  logForDebugging(`[upstreamproxy] relay listening on 127.0.0.1:${relay.port}`)
-  return relay
+    const relay =
+      typeof Bun !== 'undefined'
+        ? startBunRelay(opts.wsUrl, authHeader, wsAuthHeader)
+        : await startNodeRelay(opts.wsUrl, authHeader, wsAuthHeader)
+
+    logForDebugging(`[upstreamproxy] relay listening on 127.0.0.1:${relay.port}`)
+    monitor.end();
+    monitor.log();
+    return relay
+  })
 }
 
 function startBunRelay(

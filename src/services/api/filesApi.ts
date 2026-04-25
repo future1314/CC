@@ -17,6 +17,8 @@ import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import { sleep } from '../../utils/sleep.js'
+import { ConcurrencyLimiter } from '../../utils/concurrency.js'
+import { AdvancedLogger } from '../../utils/advancedLog.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -28,6 +30,12 @@ const FILES_API_BETA_HEADER = 'files-api-2025-04-14,oauth-2025-04-20'
 const ANTHROPIC_VERSION = '2023-06-01'
 
 // API base URL - uses ANTHROPIC_BASE_URL set by env-manager for the appropriate environment
+
+// Concurrency limiter for file operations
+const fileOperationLimiter = new ConcurrencyLimiter(3); // 限制同时进行3个文件操作
+
+// Rate limiter for API requests
+const apiRateLimiter = createRateLimiter(10, 60000); // 每分钟最多10个请求
 // Falls back to public API for standalone usage
 function getDefaultApiBaseUrl(): string {
   return (
@@ -133,24 +141,29 @@ export async function downloadFile(
   fileId: string,
   config: FilesApiConfig,
 ): Promise<Buffer> {
+  const logger = AdvancedLogger.getInstance();
+  const monitor = createPerformanceMonitor(`downloadFile-${fileId}`);
+  monitor.start();
+  
   const baseUrl = config.baseUrl || getDefaultApiBaseUrl()
   const url = `${baseUrl}/v1/files/${fileId}/content`
-
+  
   const headers = {
     Authorization: `Bearer ${config.oauthToken}`,
     'anthropic-version': ANTHROPIC_VERSION,
     'anthropic-beta': FILES_API_BETA_HEADER,
   }
-
+  
   logDebug(`Downloading file ${fileId} from ${url}`)
-
-  return retryWithBackoff(`Download file ${fileId}`, async () => {
-    try {
-      const response = await axios.get(url, {
-        headers,
-        responseType: 'arraybuffer',
-        timeout: 60000, // 60 second timeout for large files
-        validateStatus: status => status < 500,
+  
+  return apiRateLimiter.execute(async () => {
+    return fileOperationLimiter.execute(async () => {
+      return retryWithBackoff(`Download file ${fileId}`, async () => {
+        try {
+          const response = await axios.get(url, {
+            headers,
+            responseType: 'arraybuffer',
+            timeout: 60000, // 60 second timeout for large files        validateStatus: status => status < 500,
       })
 
       if (response.status === 200) {
@@ -204,28 +217,25 @@ export function buildDownloadPath(
   ]
   const matchedPrefix = redundantPrefixes.find(p => normalized.startsWith(p))
   const cleanPath = matchedPrefix
-    ? normalized.slice(matchedPrefix.length)
-    : normalized
-  return path.join(uploadsBase, cleanPath)
-}
-
-/**
- * Downloads a file and saves it to the session-specific workspace directory
- *
- * @param attachment - The file attachment to download
- * @param config - Files API configuration
- * @returns Download result with success/failure status
- */
 export async function downloadAndSaveFile(
-  attachment: File,
+  fileId: string,
   config: FilesApiConfig,
-): Promise<DownloadResult> {
-  const { fileId, relativePath } = attachment
-  const fullPath = buildDownloadPath(getCwd(), config.sessionId, relativePath)
-
-  if (!fullPath) {
-    return {
-      fileId,
+  outputPath: string,
+): Promise<void> {
+  const logger = AdvancedLogger.getInstance();
+  const monitor = createPerformanceMonitor(`downloadAndSaveFile-${fileId}`);
+  monitor.start();
+  
+  const content = await downloadFile(fileId, config);
+  const parentDir = path.dirname(outputPath);
+  
+  await fs.mkdir(parentDir, { recursive: true });
+  await fs.writeFile(outputPath, content);
+  
+  monitor.end();
+  monitor.log();
+  logger.info(`File downloaded and saved to ${outputPath}`);
+}      fileId,
       path: '',
       success: false,
       error: `Invalid file path: ${relativePath}`,

@@ -7,17 +7,24 @@
 //    sequentially via sync spawn inside applySafeConfigEnvironmentVariables()
 //    (~65ms on every macOS startup)
 import { profileCheckpoint, profileReport } from './utils/startupProfiler.js';
+import { wrapAsync } from './utils/errors.js';
+import { AdvancedLogger } from './utils/advancedLog.js';
+
+// Initialize advanced logger
+const logger = AdvancedLogger.getInstance();
+logger.setLogLevel(LogLevel.INFO);
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 profileCheckpoint('main_tsx_entry');
-import { startMdmRawRead } from './utils/settings/mdm/rawRead.js';
 
-// eslint-disable-next-line custom-rules/no-top-level-side-effects
-startMdmRawRead();
-import { ensureKeychainPrefetchCompleted, startKeychainPrefetch } from './utils/secureStorage/keychainPrefetch.js';
+// Run MDM and keychain reads in parallel to reduce startup time
+const [mdmData, keychainData] = await Promise.all([
+  wrapAsync(() => import('./utils/settings/mdm/rawRead.js').then(m => m.startMdmRawRead())),
+  wrapAsync(() => import('./utils/secureStorage/keychainPrefetch.js').then(k => k.startKeychainPrefetch()))
+]);
 
-// eslint-disable-next-line custom-rules/no-top-level-side-effects
-startKeychainPrefetch();
+// Wait for keychain data to be ready
+await keychainData.ensureKeychainPrefetchCompleted();
 import { feature } from 'bun:bundle';
 import { Command as CommanderCommand, InvalidArgumentError, Option } from '@commander-js/extra-typings';
 import chalk from 'chalk';

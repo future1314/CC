@@ -4,13 +4,21 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowJs": true,
-    "checkJs": false,
+    "checkJs": true,
     "jsx": "react-jsx",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "skipLibCheck": true,
-    "strict": false,
+    "skipLibCheck": false,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
       "src/*": [
@@ -25,5 +33,9 @@
     "src/**/*",
     "vendor/**/*",
     "shims/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
   ]
 }

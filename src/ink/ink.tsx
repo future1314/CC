@@ -39,6 +39,20 @@ import { DBP, DFE, DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, ENTER_ALT_SCRE
 import { CLEAR_ITERM2_PROGRESS, CLEAR_TAB_STATUS, setClipboard, supportsTabStatus, wrapForMultiplexer } from './termio/osc.js';
 import { TerminalWriteProvider } from './useTerminalNotification.js';
 
+// Cache frequently used objects to reduce allocations
+const cachedObjects = {
+  altScreenAnchor: Object.freeze({
+    x: 0,
+    y: 0,
+    visible: false
+  }),
+  cursorHomePatch: Object.freeze({
+    x: 0,
+    y: 0,
+    visible: true
+  })
+};
+
 // Alt-screen: renderer.ts sets cursor.visible = !isTTY || screen.height===0,
 // which is always false in alt-screen (TTY + content fills screen).
 // Reusing a frozen object saves 1 allocation per frame.
