@@ -17,7 +17,7 @@ const remove = {
     console.log(`\n正在删除提供商: ${providerId}`)
 
     try {
-      const { adapterService } = await import('../../../services/adapterService.js')
+      const { adapterService } = await import('../../services/adapterService.js')
       await adapterService.deleteProvider(providerId)
       console.log('✓ 提供商删除成功')
     } catch (err) {

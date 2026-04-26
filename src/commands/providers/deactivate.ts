@@ -6,7 +6,7 @@ const deactivate = {
   description: 'Deactivate current provider and use official Anthropic',
   async run() {
     try {
-      const { adapterService } = await import('../../../services/adapterService.js')
+      const { adapterService } = await import('../../services/adapterService.js')
       const config = await adapterService.listProviders()
 
       if (!config.activeId) {

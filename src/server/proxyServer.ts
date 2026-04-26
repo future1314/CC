@@ -3,66 +3,94 @@
  */
 
 import { handleProxyRequest } from './proxy/handler.js'
+import http from 'node:http'
 
 const PORT = 3456
 
-let server: Deno.serveHandler | null = null
+let server: http.Server | null = null
 
 /**
  * 启动代理服务器
  */
-export async function startProxyServer(): Promise<void> {
+export async function startProxyServer(): Promise<number> {
   if (server) {
     console.log('[Proxy Server] Already running on port', PORT)
-    return
+    return PORT
   }
 
-  const handler = async (req: Request): Promise<Response> => {
-    const url = new URL(req.url)
+  const handler: http.RequestListener = async (req, res) => {
+    try {
+      // Build a Web API Request from Node.js IncomingMessage
+      const chunks: Buffer[] = []
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk))
+      }
+      const body = Buffer.concat(chunks)
 
-    // Handle proxy requests
-    if (url.pathname.startsWith('/proxy')) {
-      return handleProxyRequest(req, url)
+      const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`)
+
+      const webRequest = new Request(url, {
+        method: req.method || 'GET',
+        headers: Object.fromEntries(
+          Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v)]),
+        ),
+        body: req.method !== 'GET' && req.method !== 'HEAD' && body.length > 0 ? body : undefined,
+      })
+
+      const response = await handleProxyRequest(webRequest, url)
+
+      // Write response back
+      res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
+      if (response.body) {
+        const reader = response.body.getReader()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          res.write(value)
+        }
+      }
+      res.end()
+    } catch (err) {
+      console.error('[Proxy Server] Error:', err)
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+      }
+      res.end(JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Internal proxy error' } }))
     }
-
-    // Health check
-    if (url.pathname === '/health') {
-      return Response.json({ status: 'ok', timestamp: Date.now() })
-    }
-
-    return Response.json(
-      { error: 'Not Found', message: 'Unknown endpoint' },
-      { status: 404 },
-    )
   }
 
-  try {
-    // Deno.serve is available in Bun (or Node with http module)
-    // For compatibility, we'll use a simple HTTP server approach
-    const http = await import('node:http')
-    const serverInstance = http.createServer(handler)
-
-    serverInstance.listen(PORT, () => {
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer(handler)
+    srv.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log('[Proxy Server] Port', PORT, 'already in use, reusing existing')
+        server = srv
+        resolve(PORT)
+        return
+      }
+      reject(err)
+    })
+    srv.listen(PORT, '127.0.0.1', () => {
+      server = srv
       console.log(`[Proxy Server] Started on http://127.0.0.1:${PORT}`)
       console.log(`[Proxy Server] Proxy endpoint: http://127.0.0.1:${PORT}/proxy/v1/messages`)
+      resolve(PORT)
     })
-
-    server = serverInstance as any
-  } catch (err) {
-    console.error('[Proxy Server] Failed to start:', err)
-    throw err
-  }
+  })
 }
 
 /**
  * 停止代理服务器
  */
 export async function stopProxyServer(): Promise<void> {
-  if (server) {
-    server.close()
-    server = null
-    console.log('[Proxy Server] Stopped')
-  }
+  if (!server) return
+  return new Promise((resolve) => {
+    server!.close(() => {
+      server = null
+      console.log('[Proxy Server] Stopped')
+      resolve()
+    })
+  })
 }
 
 /**

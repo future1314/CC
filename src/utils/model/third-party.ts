@@ -191,6 +191,15 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
       supportsTools: true,
       models: [
         {
+          id: 'MiniMax-M2.7',
+          name: 'MiniMax-M2.7',
+          provider: 'minimax',
+          maxTokens: 131072,
+          costPer1kInput: 0.001,
+          costPer1kOutput: 0.002,
+          description: 'MiniMax-M2.7 大语言模型'
+        },
+        {
           id: 'abab6.5-chat',
           name: 'Abab 6.5 Chat',
           provider: 'minimax',

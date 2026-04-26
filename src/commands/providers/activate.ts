@@ -16,7 +16,7 @@ const activate = {
     console.log(`\n正在激活提供商: ${providerId}`)
 
     try {
-      const { adapterService } = await import('../../../services/adapterService.js')
+      const { adapterService } = await import('../../services/adapterService.js')
       await adapterService.activateProvider(providerId)
       console.log('✓ 提供商激活成功')
     } catch (err) {

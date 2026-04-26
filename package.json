@@ -17,7 +17,12 @@
   "scripts": {
     "dev": "bun ./src/dev-entry.ts",
     "start": "bun ./src/dev-entry.ts",
-    "version": "bun ./src/dev-entry.ts --version"
+    "version": "bun ./src/dev-entry.ts --version",
+    "manage": "bun ./src/manage.ts",
+    "manage:web": "bun ./src/manage.ts web",
+    "manage:proxy": "bun ./src/manage.ts proxy",
+    "manage:status": "bun ./src/manage.ts status",
+    "manage:providers": "bun ./src/manage.ts providers"
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "*",

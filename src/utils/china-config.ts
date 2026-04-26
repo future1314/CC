@@ -55,7 +55,7 @@ export function getChinaConfig(): ChinaConfig {
       // 国内镜像地址
       anthropic: process.env.ANTHROPIC_BASE_URL_CN || 'https://open.bigmodel.cn/api/anthropic',
       ollama: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-      minimax: process.env.MINIMAX_BASE_URL || 'https://api.minimax.chat/v1',
+      minimax: process.env.MINIMAX_BASE_URL || 'https://api.minimaxi.com/anthropic',
       zhipu: process.env.ZHIPU_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
     },
     defaultModels: {

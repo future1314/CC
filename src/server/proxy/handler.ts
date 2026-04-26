@@ -16,6 +16,11 @@ import { openaiResponsesStreamToAnthropic } from './streaming/openaiResponsesStr
 import type { AnthropicRequest } from './transform/types.js'
 
 export async function handleProxyRequest(req: Request, url: URL): Promise<Response> {
+  // Health check
+  if (req.method === 'GET' && url.pathname === '/health') {
+    return Response.json({ status: 'ok', timestamp: Date.now() })
+  }
+
   // Only handle POST /proxy/v1/messages
   if (req.method !== 'POST' || url.pathname !== '/proxy/v1/messages') {
     return Response.json(
