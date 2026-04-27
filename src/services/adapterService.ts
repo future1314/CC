@@ -26,9 +26,15 @@ export interface SavedProvider {
   notes?: string
 }
 
+export interface TrashEntry {
+  provider: SavedProvider
+  deletedAt: number
+}
+
 export interface ProvidersIndex {
   activeId: string | null
   providers: SavedProvider[]
+  trash: TrashEntry[]
 }
 
 export interface CreateProviderInput {
@@ -66,9 +72,10 @@ const MANAGED_ENV_KEYS = [
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_USE_ADAPTER',
 ] as const
 
-const DEFAULT_INDEX: ProvidersIndex = { activeId: null, providers: [] }
+const DEFAULT_INDEX: ProvidersIndex = { activeId: null, providers: [], trash: [] }
 
 class AdapterService {
   private getConfigDir(): string {
@@ -82,10 +89,15 @@ class AdapterService {
   private async readIndex(): Promise<ProvidersIndex> {
     try {
       const raw = await fs.readFile(this.getIndexPath(), 'utf-8')
-      return JSON.parse(raw) as ProvidersIndex
+      const parsed = JSON.parse(raw) as Partial<ProvidersIndex>
+      return {
+        activeId: parsed.activeId ?? null,
+        providers: parsed.providers ?? [],
+        trash: parsed.trash ?? [],
+      }
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { ...DEFAULT_INDEX, providers: [] }
+        return { ...DEFAULT_INDEX, providers: [], trash: [] }
       }
       throw new Error(`Failed to read adapter config: ${err}`)
     }
@@ -185,8 +197,54 @@ class AdapterService {
       throw new Error('Cannot delete active provider. Switch to another provider first.')
     }
 
-    index.providers.splice(idx, 1)
+    // Soft delete — move to trash
+    const [provider] = index.providers.splice(idx, 1)
+    index.trash.push({ provider, deletedAt: Date.now() })
     await this.writeIndex(index)
+  }
+
+  // --- Trash / Recycle Bin ---
+
+  async listTrash(): Promise<TrashEntry[]> {
+    const index = await this.readIndex()
+    return index.trash
+  }
+
+  async restoreProvider(id: string): Promise<SavedProvider> {
+    const index = await this.readIndex()
+    const idx = index.trash.findIndex((t) => t.provider.id === id)
+    if (idx === -1) throw new Error(`Trash entry not found: ${id}`)
+
+    const [entry] = index.trash.splice(idx, 1)
+    index.providers.push(entry.provider)
+    await this.writeIndex(index)
+    return entry.provider
+  }
+
+  async permanentlyDeleteFromTrash(id: string): Promise<void> {
+    const index = await this.readIndex()
+    const idx = index.trash.findIndex((t) => t.provider.id === id)
+    if (idx === -1) throw new Error(`Trash entry not found: ${id}`)
+
+    index.trash.splice(idx, 1)
+    await this.writeIndex(index)
+  }
+
+  // --- Copy / Clone ---
+
+  async copyProvider(id: string, newName?: string): Promise<SavedProvider> {
+    const index = await this.readIndex()
+    const source = index.providers.find((p) => p.id === id)
+    if (!source) throw new Error(`Provider not found: ${id}`)
+
+    const copy: SavedProvider = {
+      ...source,
+      id: crypto.randomUUID(),
+      name: newName || `${source.name} (副本)`,
+    }
+    index.providers.push(copy)
+    await this.writeIndex(index)
+    return copy
   }
 
   // --- Activation ---
@@ -214,13 +272,15 @@ class AdapterService {
     const settingsPath = path.join(this.getConfigDir(), 'settings.json')
 
     // Determine the base URL strategy:
-    // - anthropic format: use provider's baseUrl directly (may be a mirror/proxy)
-    // - ollama format: use provider's baseUrl directly
-    // - openai_chat/openai_responses: if proxy server is running, use proxy;
-    //   otherwise use provider's baseUrl directly and set CLAUDE_CODE_USE_ADAPTER
-    //   so the runtime knows to use adapter-mode API calls.
-    const needsProxy = provider.apiFormat !== 'anthropic' && provider.apiFormat !== 'ollama'
-    const baseUrl = provider.baseUrl
+    // - anthropic format: use provider's baseUrl directly (Anthropic-compatible mirror)
+    // - ollama format: needs proxy (Ollama's /v1/chat/completions is OpenAI format,
+    //   not Anthropic Messages format) — point CLI at proxy server
+    // - openai_chat/openai_responses: needs proxy for Anthropic→OpenAI conversion
+    const needsProxy = provider.apiFormat !== 'anthropic'
+    // The CLI must talk to the proxy server. The proxy reads the upstream
+    // provider's baseUrl from the adapter config and forwards requests there.
+    const proxyPort = 3456
+    const baseUrl = needsProxy ? `http://127.0.0.1:${proxyPort}` : provider.baseUrl
 
     const envOverrides: Record<string, string> = {
       ANTHROPIC_BASE_URL: baseUrl,

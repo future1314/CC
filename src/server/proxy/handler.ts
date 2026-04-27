@@ -17,14 +17,15 @@ import type { AnthropicRequest } from './transform/types.js'
 
 export async function handleProxyRequest(req: Request, url: URL): Promise<Response> {
   // Health check
-  if (req.method === 'GET' && url.pathname === '/health') {
-    return Response.json({ status: 'ok', timestamp: Date.now() })
+  if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/')) {
+    return Response.json({ status: 'ok', timestamp: Date.now(), proxy: 'running' })
   }
 
-  // Only handle POST /proxy/v1/messages
-  if (req.method !== 'POST' || url.pathname !== '/proxy/v1/messages') {
+  // Handle Anthropic SDK paths: /v1/messages and /proxy/v1/messages
+  // The SDK sends to {baseURL}/v1/messages by default
+  if (req.method !== 'POST' || !(url.pathname === '/v1/messages' || url.pathname === '/proxy/v1/messages')) {
     return Response.json(
-      { type: 'error', error: { type: 'invalid_request_error', message: 'Proxy only handles POST /proxy/v1/messages' } },
+      { type: 'error', error: { type: 'invalid_request_error', message: `Proxy only handles POST /v1/messages (got ${req.method} ${url.pathname})` } },
       { status: 404 },
     )
   }
@@ -38,14 +39,10 @@ export async function handleProxyRequest(req: Request, url: URL): Promise<Respon
     )
   }
 
-  if (config.apiFormat === 'anthropic' || config.apiFormat === 'ollama') {
-    // For native Anthropic format or Ollama, proxy not needed - use direct connection
-    // Ollama may still need the base URL to be set correctly
-    if (config.apiFormat === 'ollama') {
-      console.log('[Proxy] Ollama provider detected, using direct connection')
-    }
+  if (config.apiFormat === 'anthropic') {
+    // Native Anthropic-compatible endpoint — direct connection, no proxy needed
     return Response.json(
-      { type: 'error', error: { type: 'invalid_request_error', message: 'Provider uses direct connection format' } },
+      { type: 'error', error: { type: 'invalid_request_error', message: 'Anthropic-compatible provider uses direct connection, no proxy needed' } },
       { status: 400 },
     )
   }
@@ -65,12 +62,13 @@ export async function handleProxyRequest(req: Request, url: URL): Promise<Respon
   const baseUrl = config.baseUrl.replace(/\/+$/, '')
 
   try {
-    if (config.apiFormat === 'openai_chat') {
+    if (config.apiFormat === 'openai_chat' || config.apiFormat === 'ollama') {
+      // Ollama supports OpenAI-compatible /v1/chat/completions
       return await handleOpenaiChat(body, baseUrl, config.apiKey, isStream)
     } else if (config.apiFormat === 'openai_responses') {
       return await handleOpenaiResponses(body, baseUrl, config.apiKey, isStream)
     } else {
-      // Custom format - try OpenAI chat first, then fall back
+      // Unknown format — default to OpenAI chat
       return await handleOpenaiChat(body, baseUrl, config.apiKey, isStream)
     }
   } catch (err) {

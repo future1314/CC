@@ -273,6 +273,63 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
     }
   }
 
+  // POST /api/providers/:id/copy — clone a provider
+  if (method === 'POST' && segs.length === 3 && segs[0] === 'providers' && segs[2] === 'copy') {
+    try {
+      const data = await bodyJson(req)
+      const copy = await adapterService.copyProvider(segs[1], data?.name as string | undefined)
+      return json(res, copy, 201), true
+    } catch (err) {
+      return json(res, { error: (err as Error).message }, 400), true
+    }
+  }
+
+  // POST /api/providers/:id/trash — soft-delete (move to recycle bin)
+  if (method === 'POST' && segs.length === 3 && segs[0] === 'providers' && segs[2] === 'trash') {
+    try {
+      await adapterService.deleteProvider(segs[1])
+      return json(res, { ok: true }), true
+    } catch (err) {
+      return json(res, { error: (err as Error).message }, 400), true
+    }
+  }
+
+  // GET /api/trash — list trashed providers
+  if (method === 'GET' && segs[0] === 'trash' && segs.length === 1) {
+    try {
+      const trash = await adapterService.listTrash()
+      return json(res, trash.map(t => ({
+        id: t.provider.id,
+        name: t.provider.name,
+        baseUrl: t.provider.baseUrl,
+        apiFormat: t.provider.apiFormat,
+        deletedAt: t.deletedAt,
+      }))), true
+    } catch (err) {
+      return json(res, { error: (err as Error).message }, 500), true
+    }
+  }
+
+  // POST /api/trash/:id/restore — restore from trash
+  if (method === 'POST' && segs.length === 3 && segs[0] === 'trash' && segs[2] === 'restore') {
+    try {
+      const restored = await adapterService.restoreProvider(segs[1])
+      return json(res, restored), true
+    } catch (err) {
+      return json(res, { error: (err as Error).message }, 400), true
+    }
+  }
+
+  // DELETE /api/trash/:id — permanently delete
+  if (method === 'DELETE' && segs.length === 2 && segs[0] === 'trash') {
+    try {
+      await adapterService.permanentlyDeleteFromTrash(segs[1])
+      return json(res, { ok: true }), true
+    } catch (err) {
+      return json(res, { error: (err as Error).message }, 400), true
+    }
+  }
+
   // POST /api/providers/deactivate
   if (method === 'POST' && segs[0] === 'providers' && segs[1] === 'deactivate') {
     try {
@@ -421,6 +478,11 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
     <div id="proxyStatus" style="margin-top:8px;font-size:13px;color:var(--muted)"></div>
   </section>
 
+  <section class="card" id="trashSection" style="display:none">
+    <h2>🗑 回收站</h2>
+    <div class="grid" id="trashGrid"></div>
+  </section>
+
   <section class="card">
     <h2>📋 预设提供商</h2>
     <div class="grid" id="presetGrid"></div>
@@ -517,6 +579,7 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
     loadStatus();
     loadProviders();
     loadPresets();
+    loadTrash();
   }
 
   function loadStatus() {
@@ -558,12 +621,13 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
           '<button class="btn btn-sm hk-test" data-id="' + esc(p.id) + '" style="background:var(--pink);border-color:var(--pink);color:#fff">测试</button> ' +
           (!isActive ? '<button class="btn btn-primary btn-sm hk-activate" data-id="' + esc(p.id) + '">激活</button> ' : '') +
           '<button class="btn btn-sm hk-edit" data-id="' + esc(p.id) + '" style="background:var(--yellow);border-color:var(--yellow);color:#000">编辑</button> ' +
-          '<button class="btn btn-danger btn-sm hk-delete" data-id="' + esc(p.id) + '">删除</button>' +
+          '<button class="btn btn-sm hk-copy" data-id="' + esc(p.id) + '" style="background:var(--blue);border-color:var(--blue);color:#fff">复制</button> ' +
+          '<button class="btn btn-danger btn-sm hk-trash" data-id="' + esc(p.id) + '">删除</button>' +
           '</div>' +
           '<div class="test-result" id="test-' + esc(p.id) + '" style="margin-top:8px;font-size:12px;display:none"></div>';
         grid.appendChild(card);
       });
-      // Bind test/activate/edit/delete buttons
+      // Bind buttons
       grid.querySelectorAll('.hk-test').forEach(function(btn) {
         btn.addEventListener('click', function() { testProvider(this.dataset.id, this); });
       });
@@ -573,8 +637,11 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
       grid.querySelectorAll('.hk-edit').forEach(function(btn) {
         btn.addEventListener('click', function() { openEditModal(this.dataset.id); });
       });
-      grid.querySelectorAll('.hk-delete').forEach(function(btn) {
-        btn.addEventListener('click', function() { deleteProvider(this.dataset.id); });
+      grid.querySelectorAll('.hk-copy').forEach(function(btn) {
+        btn.addEventListener('click', function() { copyProvider(this.dataset.id); });
+      });
+      grid.querySelectorAll('.hk-trash').forEach(function(btn) {
+        btn.addEventListener('click', function() { trashProvider(this.dataset.id); });
       });
     }).catch(function(e) { console.error('loadProviders:', e); });
   }
@@ -642,13 +709,82 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
     });
   }
 
-  function deleteProvider(id) {
-    if (!confirm('确认删除此提供商?')) return;
-    callApi('/providers/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) {
-      if (r.ok) toast('已删除', 'success');
-      else toast('删除失败: ' + (r.error || ''), 'error');
+  // ─── Copy ──────────────────────────────────
+  function copyProvider(id) {
+    callApi('/providers/' + encodeURIComponent(id) + '/copy', { method: 'POST' }).then(function(r) {
+      if (r.error) { toast('复制失败: ' + r.error, 'error'); return; }
+      toast('已复制: ' + r.name, 'success');
       loadAll();
     }).catch(function(e) { toast('网络错误: ' + e.message, 'error'); });
+  }
+
+  // ─── Trash (soft delete) ────────────────────
+  function trashProvider(id) {
+    if (!confirm('确认删除此提供商? 将移到回收站，可以恢复。')) return;
+    callApi('/providers/' + encodeURIComponent(id) + '/trash', { method: 'POST' }).then(function(r) {
+      if (r.ok) toast('已移到回收站', 'info');
+      else toast('删除失败: ' + (r.error || ''), 'error');
+      loadAll();
+      loadTrash();
+    }).catch(function(e) { toast('网络错误: ' + e.message, 'error'); });
+  }
+
+  function restoreProvider(id) {
+    callApi('/trash/' + encodeURIComponent(id) + '/restore', { method: 'POST' }).then(function(r) {
+      if (r.error) { toast('还原失败: ' + r.error, 'error'); return; }
+      toast('已还原: ' + r.name, 'success');
+      loadAll();
+      loadTrash();
+    }).catch(function(e) { toast('网络错误: ' + e.message, 'error'); });
+  }
+
+  function permanentDelete(id) {
+    if (!confirm('⚠ 此操作不可恢复！确认彻底删除?')) return;
+    callApi('/trash/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) {
+      if (r.ok) toast('已彻底删除', 'info');
+      else toast('删除失败: ' + (r.error || ''), 'error');
+      loadTrash();
+    }).catch(function(e) { toast('网络错误: ' + e.message, 'error'); });
+  }
+
+  function loadTrash() {
+    callApi('/trash').then(function(trash) {
+      var section = el('trashSection');
+      var grid = el('trashGrid');
+      if (!trash.length) {
+        section.style.display = 'none';
+        return;
+      }
+      section.style.display = 'block';
+      grid.innerHTML = '';
+      trash.forEach(function(t) {
+        var ago = Math.round((Date.now() - t.deletedAt) / 60000);
+        var card = document.createElement('div');
+        card.className = 'provider-card';
+        card.style.borderColor = 'var(--red)';
+        card.innerHTML =
+          '<h3 style="color:var(--red)">' + esc(t.name) + '</h3>' +
+          '<div class="meta">端点: ' + esc(t.baseUrl) + '</div>' +
+          '<div class="meta">格式: ' + esc(t.apiFormat || 'anthropic') + '</div>' +
+          '<div class="meta">删除于: ' + ago + ' 分钟前</div>' +
+          '<div class="actions">' +
+          '<button class="btn btn-sm hk-restore" data-id="' + esc(t.id) + '" style="background:var(--green);border-color:var(--green);color:#fff">还原</button> ' +
+          '<button class="btn btn-danger btn-sm hk-perm-delete" data-id="' + esc(t.id) + '">彻底删除</button>' +
+          '</div>';
+        grid.appendChild(card);
+      });
+      grid.querySelectorAll('.hk-restore').forEach(function(btn) {
+        btn.addEventListener('click', function() { restoreProvider(this.dataset.id); });
+      });
+      grid.querySelectorAll('.hk-perm-delete').forEach(function(btn) {
+        btn.addEventListener('click', function() { permanentDelete(this.dataset.id); });
+      });
+    }).catch(function(e) { console.error('loadTrash:', e); });
+  }
+
+  // Legacy alias kept for compatibility
+  function deleteProvider(id) {
+    trashProvider(id);
   }
 
   function switchToOfficial() {

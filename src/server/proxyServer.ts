@@ -73,7 +73,7 @@ export async function startProxyServer(): Promise<number> {
     srv.listen(PORT, '127.0.0.1', () => {
       server = srv
       console.log(`[Proxy Server] Started on http://127.0.0.1:${PORT}`)
-      console.log(`[Proxy Server] Proxy endpoint: http://127.0.0.1:${PORT}/proxy/v1/messages`)
+      console.log(`[Proxy Server] Accepting Anthropic SDK requests at http://127.0.0.1:${PORT}/v1/messages`)
       resolve(PORT)
     })
   })
