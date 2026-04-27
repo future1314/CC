@@ -25,30 +25,41 @@ export type ChinaConfig = {
 
 /**
  * 检测是否在中国大陆环境
+ * Result is cached for the process lifetime since locale / env rarely changes at runtime.
  */
+let _isChinaCached: boolean | undefined
 export function isChinaEnvironment(): boolean {
+  if (_isChinaCached !== undefined) return _isChinaCached
+
   // 检测环境变量
   if (isEnvTruthy(process.env.CLAUDE_CODE_CHINA_MODE)) {
+    _isChinaCached = true
     return true
   }
 
   // 检测系统语言
   const lang = process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE || ''
   if (lang.includes('zh_CN') || lang.includes('zh_CN.UTF-8')) {
+    _isChinaCached = true
     return true
   }
 
   // 可以添加更多的检测逻辑，如IP检测等
+  _isChinaCached = false
   return false
 }
 
 /**
  * 获取中国大陆配置
+ * Cached — returns the same object on repeated calls.
  */
+let _chinaConfigCache: ChinaConfig | undefined
 export function getChinaConfig(): ChinaConfig {
+  if (_chinaConfigCache) return _chinaConfigCache
+
   const enabled = isChinaEnvironment()
 
-  return {
+  _chinaConfigCache = {
     enabled,
     useProxy: enabled && !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_PROXY),
     apiEndpoints: {
@@ -61,9 +72,10 @@ export function getChinaConfig(): ChinaConfig {
     defaultModels: {
       ollama: process.env.OLLAMA_DEFAULT_MODEL || 'qwen2.5:latest',
       minimax: process.env.MINIMAX_DEFAULT_MODEL || 'abab6.5-chat',
-      zhipu: process.env.ZHIPU_DEFAULT_MODEL || 'glm-4-9b',
+      zhipu: process.env.ZHIPU_DEFAULT_MODEL || 'glm-4-flash',
     }
   }
+  return _chinaConfigCache
 }
 
 /**
@@ -83,4 +95,10 @@ export function getAdaptedApiEndpoint(service: keyof ChinaConfig['apiEndpoints']
   }
 
   return config.apiEndpoints[service] || ''
+}
+
+/** Invalidate caches (useful when env changes at runtime, e.g. in tests) */
+export function resetChinaConfigCache(): void {
+  _isChinaCached = undefined
+  _chinaConfigCache = undefined
 }

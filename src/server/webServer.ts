@@ -14,27 +14,38 @@
 import { adapterService } from '../services/adapterService.js'
 import { getThirdPartyProviders } from '../utils/model/third-party.js'
 import { getChinaConfig } from '../utils/china-config.js'
+import { getProxyPort } from './proxyServer.js'
 import * as fs from 'fs'
 import * as path from 'path'
 
-const PORT = 3457
+const DEFAULT_PORT = 3457
+
+function getPort(): number {
+  const envPort = parseInt(process.env.CLAUDE_WEB_PORT || '', 10)
+  return Number.isNaN(envPort) ? DEFAULT_PORT : envPort
+}
 
 let server_: ReturnType<typeof import('node:http').createServer> | null = null
 
 // ─── JSON helpers ─────────────────────────────────────────────
 
+// CORS: restrict to localhost since this is a local management server
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': 'http://127.0.0.1:* http://localhost:*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
 function json(res: import('node:http').ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    ...CORS_HEADERS,
   })
   res.end(JSON.stringify(data, null, 2))
 }
 
 function text(res: import('node:http').ServerResponse, body: string, status = 200, contentType = 'text/html; charset=utf-8'): void {
-  res.writeHead(status, { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*' })
+  res.writeHead(status, { 'Content-Type': contentType, ...CORS_HEADERS })
   res.end(body)
 }
 
@@ -155,7 +166,7 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
       adapterService.checkAuthStatus(),
       Promise.resolve(getChinaConfig()),
     ])
-    return json(res, { china: chinaConfig, auth: providerStatus, proxyPort: 3456, webPort: PORT }), true
+    return json(res, { china: chinaConfig, auth: providerStatus, proxyPort: getProxyPort(), webPort: getPort() }), true
   }
 
   // GET /api/providers — list all providers
@@ -345,7 +356,7 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
     try {
       const { startProxyServer } = await import('./proxyServer.js')
       await startProxyServer()
-      return json(res, { ok: true, port: 3456 }), true
+      return json(res, { ok: true, port: getProxyPort() }), true
     } catch (err) {
       return json(res, { error: (err as Error).message }, 500), true
     }
@@ -369,14 +380,26 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
   }
 
   // GET /api/env — current environment variables relevant to model config
+  // (masks sensitive values to avoid leaking API keys through the web UI)
   if (method === 'GET' && segs[0] === 'env') {
+    const sensitiveKeys = new Set(['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'])
     const keys = [
       'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_AUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
       'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
       'CLAUDE_CODE_USE_ADAPTER', 'CLAUDE_CODE_CHINA_MODE',
     ]
     const env: Record<string, string | undefined> = {}
-    for (const k of keys) env[k] = process.env[k] || undefined
+    for (const k of keys) {
+      const val = process.env[k]
+      if (val) {
+        env[k] = sensitiveKeys.has(k)
+          ? (val.length > 4 ? '****' + val.slice(-4) : '****')
+          : val
+      } else {
+        env[k] = undefined
+      }
+    }
     return json(res, env), true
   }
 
@@ -386,6 +409,8 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 // ─── Static HTML for Management UI ─────────────────────────────
 
 function getManagementPage(): string {
+  const proxyPort = getProxyPort()
+  const webPort = getPort()
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -545,7 +570,7 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 (function() {
   'use strict';
   var API = '/api';
-  var PROXY_PORT = 3456;
+  var PROXY_PORT = ${proxyPort};
 
   function el(id) { return document.getElementById(id); }
 
@@ -974,10 +999,11 @@ function createHandler() {
 
 // ─── Public API ─────────────────────────────────────────────────
 
-export async function startWebServer(port = PORT): Promise<number> {
+export async function startWebServer(port?: number): Promise<number> {
+  const actualPort = port ?? getPort()
   if (server_) {
-    console.log('[Web Server] Already running on port', port)
-    return port
+    console.log('[Web Server] Already running on port', actualPort)
+    return actualPort
   }
 
   const http = await import('node:http')
@@ -989,20 +1015,20 @@ export async function startWebServer(port = PORT): Promise<number> {
 
     srv.on('error', (err: NodeJS.ErrnoException) => {
       if (!started && err.code === 'EADDRINUSE') {
-        console.log('[Web Server] Port', port, 'in use, trying', port + 1)
+        console.log('[Web Server] Port', actualPort, 'in use, trying', actualPort + 1)
         srv.close()
-        startWebServer(port + 1).then(resolve).catch(reject)
+        startWebServer(actualPort + 1).then(resolve).catch(reject)
         return
       }
       reject(err)
     })
 
-    srv.listen(port, '127.0.0.1', () => {
+    srv.listen(actualPort, '127.0.0.1', () => {
       started = true
       server_ = srv as any
-      console.log(`[Web Server] Management UI available at http://127.0.0.1:${port}/`)
-      console.log(`[Web Server] API at http://127.0.0.1:${port}/api/`)
-      resolve(port)
+      console.log(`[Web Server] Management UI available at http://127.0.0.1:${actualPort}/`)
+      console.log(`[Web Server] API at http://127.0.0.1:${actualPort}/api/`)
+      resolve(actualPort)
     })
   })
 }
@@ -1019,5 +1045,5 @@ export async function stopWebServer(): Promise<void> {
 }
 
 export function getWebPort(): number {
-  return PORT
+  return getPort()
 }

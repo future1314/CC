@@ -13,7 +13,7 @@ const add = {
       console.log('  /provider add Ollama http://localhost:11434 "" ollama qwen2.5:latest')
       console.log('  /provider add DeepSeek https://api.deepseek.com sk-xxx openai_chat deepseek-chat')
       console.log('  /provider add 智谱AI https://open.bigmodel.cn/api/paas/v4 xxx.zhipu openai_chat glm-4-9b')
-      console.log('  /provider add MiniMax https://api.minimax.chat/v1 your-key openai_chat abab6.5-chat')
+      console.log('  /provider add MiniMax https://api.minimaxi.com/anthropic your-key anthropic MiniMax-M2.7')
       console.log('  /provider add Kimi https://api.moonshot.cn/v1 your-key openai_chat moonshot-v1-8k')
       console.log('')
       console.log('API格式选项: anthropic, openai_chat, openai_responses, ollama')

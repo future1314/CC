@@ -5,14 +5,20 @@
 import { handleProxyRequest } from './proxy/handler.js'
 import http from 'node:http'
 
-const PORT = 3456
+const DEFAULT_PORT = 3456
 
 let server: http.Server | null = null
+
+function getPort(): number {
+  const envPort = parseInt(process.env.CLAUDE_PROXY_PORT || '', 10)
+  return Number.isNaN(envPort) ? DEFAULT_PORT : envPort
+}
 
 /**
  * 启动代理服务器
  */
 export async function startProxyServer(): Promise<number> {
+  const PORT = getPort()
   if (server) {
     console.log('[Proxy Server] Already running on port', PORT)
     return PORT
@@ -63,8 +69,8 @@ export async function startProxyServer(): Promise<number> {
     const srv = http.createServer(handler)
     srv.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
-        console.log('[Proxy Server] Port', PORT, 'already in use, reusing existing')
-        server = srv
+        console.log('[Proxy Server] Port', PORT, 'already in use — assuming another instance is running')
+        // Do NOT set server = srv here; the failed server is not usable.
         resolve(PORT)
         return
       }
@@ -97,5 +103,5 @@ export async function stopProxyServer(): Promise<void> {
  * 获取代理服务器端口
  */
 export function getProxyPort(): number {
-  return PORT
+  return getPort()
 }

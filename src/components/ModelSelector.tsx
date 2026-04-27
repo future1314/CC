@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Box, Text, useInput, useApp, BoxNode } from 'ink'
+import React, { useState } from 'react'
+import { Box, Text, useInput, useApp } from 'ink'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { getThirdPartyProviders, getAllThirdPartyModels, ThirdPartyModel } from '../utils/model/third-party.js'
 import { getChinaConfig } from '../utils/china-config.js'
@@ -30,16 +30,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     model.id.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  useEffect(() => {
-    // ESC 关闭菜单
-    useInput((input, key) => {
-      if (key.escape) {
-        onToggleMenu?.()
-      } else if (key.ctrl && input === 'c') {
-        exit()
-      }
-    })
-  }, [onToggleMenu, exit])
+  // useInput must be called at the component level, NOT inside useEffect
+  useInput((input, key) => {
+    if (key.escape) {
+      onToggleMenu?.()
+    } else if (key.ctrl && input === 'c') {
+      exit()
+    }
+  })
 
   const handleSelect = () => {
     if (filteredModels[selectedIndex]) {

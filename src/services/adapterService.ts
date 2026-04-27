@@ -78,6 +78,9 @@ const MANAGED_ENV_KEYS = [
 const DEFAULT_INDEX: ProvidersIndex = { activeId: null, providers: [], trash: [] }
 
 class AdapterService {
+  private indexCache: ProvidersIndex | null = null
+  private writeLock: Promise<void> = Promise.resolve()
+
   private getConfigDir(): string {
     return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
   }
@@ -86,36 +89,60 @@ class AdapterService {
     return path.join(this.getConfigDir(), 'claude-code-adapters.json')
   }
 
+  /**
+   * Serialize write operations to prevent concurrent file corruption.
+   * Each call chains onto the previous write so they execute sequentially.
+   */
+  private async withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.writeLock
+    let resolve!: () => void
+    this.writeLock = new Promise(r => { resolve = r })
+    await prev
+    try {
+      return await fn()
+    } finally {
+      resolve()
+    }
+  }
+
   private async readIndex(): Promise<ProvidersIndex> {
+    if (this.indexCache) return this.indexCache
+
     try {
       const raw = await fs.readFile(this.getIndexPath(), 'utf-8')
       const parsed = JSON.parse(raw) as Partial<ProvidersIndex>
-      return {
+      this.indexCache = {
         activeId: parsed.activeId ?? null,
         providers: parsed.providers ?? [],
         trash: parsed.trash ?? [],
       }
+      return this.indexCache
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { ...DEFAULT_INDEX, providers: [], trash: [] }
+        this.indexCache = { ...DEFAULT_INDEX, providers: [], trash: [] }
+        return this.indexCache
       }
       throw new Error(`Failed to read adapter config: ${err}`)
     }
   }
 
   private async writeIndex(index: ProvidersIndex): Promise<void> {
-    const filePath = this.getIndexPath()
-    const dir = path.dirname(filePath)
-    await fs.mkdir(dir, { recursive: true })
+    return this.withWriteLock(async () => {
+      const filePath = this.getIndexPath()
+      const dir = path.dirname(filePath)
+      await fs.mkdir(dir, { recursive: true })
 
-    const tmpFile = `${filePath}.tmp.${Date.now()}`
-    try {
-      await fs.writeFile(tmpFile, JSON.stringify(index, null, 2) + '\n', 'utf-8')
-      await fs.rename(tmpFile, filePath)
-    } catch (err) {
-      await fs.unlink(tmpFile).catch(() => {})
-      throw new Error(`Failed to write adapter config: ${err}`)
-    }
+      const tmpFile = `${filePath}.tmp.${Date.now()}`
+      try {
+        await fs.writeFile(tmpFile, JSON.stringify(index, null, 2) + '\n', 'utf-8')
+        await fs.rename(tmpFile, filePath)
+        this.indexCache = index
+      } catch (err) {
+        this.indexCache = null
+        await fs.unlink(tmpFile).catch(() => {})
+        throw new Error(`Failed to write adapter config: ${err}`)
+      }
+    })
   }
 
   private maskSecret(value: string | undefined): string | undefined {
@@ -143,13 +170,33 @@ class AdapterService {
   }
 
   async addProvider(input: CreateProviderInput): Promise<SavedProvider> {
+    // Input validation
+    if (!input.name?.trim()) throw new Error('Provider name is required')
+    if (!input.baseUrl?.trim()) throw new Error('Provider baseUrl is required')
+    try {
+      const parsed = new URL(input.baseUrl)
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error('baseUrl must use http or https protocol')
+      }
+    } catch (err) {
+      if (err instanceof TypeError || (err as Error).message?.includes('URL')) {
+        throw new Error(`Invalid baseUrl: ${input.baseUrl}`)
+      }
+      throw err
+    }
+    if (!input.models?.main?.trim()) throw new Error('Provider main model is required')
+    const validFormats: ApiFormat[] = ['anthropic', 'openai_chat', 'openai_responses', 'ollama', 'minimax', 'zhipu']
+    if (input.apiFormat && !validFormats.includes(input.apiFormat)) {
+      throw new Error(`Invalid apiFormat: ${input.apiFormat}. Must be one of: ${validFormats.join(', ')}`)
+    }
+
     const index = await this.readIndex()
 
     const provider: SavedProvider = {
       id: crypto.randomUUID(),
-      name: input.name,
+      name: input.name.trim(),
       apiKey: input.apiKey,
-      baseUrl: input.baseUrl,
+      baseUrl: input.baseUrl.replace(/\/+$/, ''),
       apiFormat: input.apiFormat ?? 'anthropic',
       models: input.models,
       ...(input.notes !== undefined && { notes: input.notes }),

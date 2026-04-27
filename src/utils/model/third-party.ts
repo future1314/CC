@@ -37,6 +37,12 @@ export interface ThirdPartyProviderConfig {
 // Cache for adapter-configured models (loaded from ~/.claude/claude-code-adapters.json)
 let adapterModelsCache: ThirdPartyModel[] | null = null
 
+/** Reset the adapter models cache so next call reloads from disk. */
+export function resetAdapterModelsCache(): void {
+  adapterModelsCache = null
+  _providersCache = undefined
+}
+
 /**
  * Load models from adapter config file (if it exists).
  * This supplements the hardcoded third-party models with user-configured providers.
@@ -98,6 +104,8 @@ async function loadAdapterModels(): Promise<ThirdPartyModel[]> {
  * For full adapter model check, use isThirdPartyModelAsync().
  */
 export function isThirdPartyModel(modelId: string): boolean {
+  if (!modelId) return false
+
   // Check env vars for custom models
   const envModels = [
     process.env.ANTHROPIC_MODEL,
@@ -105,7 +113,7 @@ export function isThirdPartyModel(modelId: string): boolean {
     process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
     process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
     process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
-  ].filter(Boolean)
+  ].filter(Boolean) as string[]
 
   if (envModels.includes(modelId)) {
     // If ANTHROPIC_BASE_URL is set to a non-Anthropic endpoint, it's third-party
@@ -125,9 +133,10 @@ export function isThirdPartyModel(modelId: string): boolean {
     }
   }
 
-  // Non-Anthropic model IDs are likely third-party
-  if (modelId && !modelId.startsWith('claude-')) {
-    // But skip known aliases
+  // Non-Anthropic model IDs that don't match known Claude aliases are likely third-party.
+  // This is a heuristic — only apply it when in adapter mode or China environment
+  // to avoid false positives in standard usage.
+  if (shouldShowThirdPartyModels() && !modelId.startsWith('claude-')) {
     const knownAliases = ['sonnet', 'opus', 'haiku', 'best', 'fast']
     if (!knownAliases.includes(modelId.toLowerCase().split('[')[0])) {
       return true
@@ -139,11 +148,15 @@ export function isThirdPartyModel(modelId: string): boolean {
 
 /**
  * Get hardcoded third-party provider configs (synchronous).
+ * Cached — returns the same object on repeated calls.
  */
+let _providersCache: Record<ThirdPartyProvider, ThirdPartyProviderConfig> | undefined
 function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProviderConfig> {
+  if (_providersCache) return _providersCache
+
   const chinaConfig = getChinaConfig()
 
-  return {
+  _providersCache = {
     ollama: {
       name: 'Ollama',
       baseUrl: chinaConfig.apiEndpoints.ollama!,
@@ -162,6 +175,15 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
           description: 'Qwen 2.5 大语言模型'
         },
         {
+          id: 'deepseek-r1:latest',
+          name: 'DeepSeek R1',
+          provider: 'ollama',
+          maxTokens: 128000,
+          costPer1kInput: 0,
+          costPer1kOutput: 0,
+          description: 'DeepSeek R1 推理模型（本地）'
+        },
+        {
           id: 'llama3.1:latest',
           name: 'Llama 3.1',
           provider: 'ollama',
@@ -170,15 +192,6 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
           costPer1kOutput: 0,
           description: 'Meta Llama 3.1'
         },
-        {
-          id: 'mistral:latest',
-          name: 'Mistral',
-          provider: 'ollama',
-          maxTokens: 8192,
-          costPer1kInput: 0,
-          costPer1kOutput: 0,
-          description: 'Mistral 7B'
-        }
       ]
     },
     minimax: {
@@ -234,9 +247,27 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
       apiKey: process.env.ZHIPU_API_KEY,
       defaultModel: chinaConfig.defaultModels.zhipu!,
       supportStream: true,
-      supportImages: false,
+      supportImages: true,
       supportsTools: true,
       models: [
+        {
+          id: 'glm-4-plus',
+          name: 'GLM-4-Plus',
+          provider: 'zhipu',
+          maxTokens: 128000,
+          costPer1kInput: 0.05,
+          costPer1kOutput: 0.05,
+          description: '智谱 GLM-4-Plus（高性能）'
+        },
+        {
+          id: 'glm-4-flash',
+          name: 'GLM-4-Flash',
+          provider: 'zhipu',
+          maxTokens: 128000,
+          costPer1kInput: 0.0001,
+          costPer1kOutput: 0.0001,
+          description: '智谱 GLM-4-Flash（免费/超低成本）'
+        },
         {
           id: 'glm-4-9b',
           name: 'GLM-4-9B',
@@ -244,7 +275,7 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
           maxTokens: 131072,
           costPer1kInput: 0.001,
           costPer1kOutput: 0.002,
-          description: '智谱 GLM-4-9B'
+          description: '智谱 GLM-4-9B（开源）'
         },
         {
           id: 'glm-4v',
@@ -255,15 +286,6 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
           costPer1kOutput: 0.01,
           description: '智谱 GLM-4V（多模态）'
         },
-        {
-          id: 'glm-3-turbo',
-          name: 'GLM-3-Turbo',
-          provider: 'zhipu',
-          maxTokens: 128000,
-          costPer1kInput: 0.0005,
-          costPer1kOutput: 0.001,
-          description: '智谱 GLM-3-Turbo（更经济）'
-        }
       ]
     },
     deepseek: {
@@ -277,31 +299,22 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
       models: [
         {
           id: 'deepseek-chat',
-          name: 'DeepSeek Chat',
+          name: 'DeepSeek V3',
           provider: 'deepseek',
           maxTokens: 128000,
           costPer1kInput: 0.0014,
           costPer1kOutput: 0.0028,
-          description: 'DeepSeek 对话模型'
-        },
-        {
-          id: 'deepseek-coder',
-          name: 'DeepSeek Coder',
-          provider: 'deepseek',
-          maxTokens: 128000,
-          costPer1kInput: 0.0014,
-          costPer1kOutput: 0.0028,
-          description: 'DeepSeek 代码模型'
+          description: 'DeepSeek V3 对话模型（含代码能力）'
         },
         {
           id: 'deepseek-reasoner',
-          name: 'DeepSeek Reasoner',
+          name: 'DeepSeek R1',
           provider: 'deepseek',
           maxTokens: 128000,
           costPer1kInput: 0.004,
           costPer1kOutput: 0.016,
-          description: 'DeepSeek 推理模型（R1）'
-        }
+          description: 'DeepSeek R1 推理模型'
+        },
       ]
     },
     kimi: {
@@ -343,11 +356,8 @@ function getThirdPartyProvidersSync(): Record<ThirdPartyProvider, ThirdPartyProv
       ]
     }
   }
+  return _providersCache
 }
-
-/**
- * 获取第三方模型配置
- */
 export function getThirdPartyProviders(): Record<ThirdPartyProvider, ThirdPartyProviderConfig> {
   return getThirdPartyProvidersSync()
 }

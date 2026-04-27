@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import { Check } from 'lucide-react'
 import { adapterService } from '../services/adapterService.js'
-import { getThirdPartyProviders } from '../utils/model/third-party.js'
+import { getThirdPartyProviders, type ThirdPartyProvider } from '../utils/model/third-party.js'
 
 interface ProviderPickerProps {
   initial?: string | null
@@ -25,7 +25,7 @@ export function ProviderPicker({ initial, onSelect, onCancel }: ProviderPickerPr
       const config = await adapterService.listProviders()
       const thirdPartyProviders = getThirdPartyProviders()
 
-      // Combine saved providers with preset providers
+      // Combine saved providers with preset providers (sourced from third-party.ts)
       const allProviders = [
         ...config.providers.map(p => ({
           id: p.id,
@@ -33,12 +33,13 @@ export function ProviderPicker({ initial, onSelect, onCancel }: ProviderPickerPr
           apiFormat: p.apiFormat,
           baseUrl: p.baseUrl
         })),
-        // Add preset providers
-        { id: 'preset-ollama', name: 'Ollama (本地)', apiFormat: 'ollama', baseUrl: 'http://localhost:11434' },
-        { id: 'preset-minimax', name: 'MiniMax', apiFormat: 'openai_chat', baseUrl: 'https://api.minimax.chat' },
-        { id: 'preset-zhipu', name: '智谱AI', apiFormat: 'openai_chat', baseUrl: 'https://open.bigmodel.cn' },
-        { id: 'preset-deepseek', name: 'DeepSeek', apiFormat: 'openai_chat', baseUrl: 'https://api.deepseek.com' },
-        { id: 'preset-kimi', name: 'Kimi', apiFormat: 'openai_chat', baseUrl: 'https://api.moonshot.cn' },
+        // Add preset providers from third-party.ts definitions (single source of truth)
+        ...Object.entries(thirdPartyProviders).map(([id, cfg]) => ({
+          id: `preset-${id}`,
+          name: cfg.name,
+          apiFormat: cfg.supportsTools ? 'openai_chat' : 'ollama',
+          baseUrl: cfg.baseUrl,
+        })),
       ]
 
       setProviders(allProviders)

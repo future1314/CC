@@ -1,5 +1,10 @@
 .DS_Store
 
+# Environment files (may contain API keys)
+.env
+.env.local
+.env.*.local
+
 node_modules/
 
 dist/
@@ -16,6 +21,11 @@ coverage/
 
 # Compiled JS artifacts (source map restored .ts files are the source of truth)
 src/**/*.js
+
+# Backup files
+*.backup
+*.original
+*.bak
 
 .claude/
 .idea/
