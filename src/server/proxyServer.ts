@@ -8,10 +8,38 @@ import http from 'node:http'
 const DEFAULT_PORT = 3456
 
 let server: http.Server | null = null
+let serverStarting: Promise<number> | null = null
 
 function getPort(): number {
   const envPort = parseInt(process.env.CLAUDE_PROXY_PORT || '', 10)
   return Number.isNaN(envPort) ? DEFAULT_PORT : envPort
+}
+
+/**
+ * 检查 Proxy Server 是否正在运行
+ */
+export function isProxyServerRunning(): boolean {
+  return server !== null
+}
+
+/**
+ * 确保 Proxy Server 运行，如果未运行则启动它
+ * 这是异步的，会等待服务器启动完成
+ */
+export async function ensureProxyServer(): Promise<number> {
+  // 如果已经在运行，直接返回
+  if (server) {
+    return getPort()
+  }
+
+  // 如果正在启动，等待它完成
+  if (serverStarting) {
+    return serverStarting
+  }
+
+  // 启动服务器
+  serverStarting = startProxyServer()
+  return serverStarting
 }
 
 /**
@@ -70,14 +98,18 @@ export async function startProxyServer(): Promise<number> {
     srv.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         console.log('[Proxy Server] Port', PORT, 'already in use — assuming another instance is running')
-        // Do NOT set server = srv here; the failed server is not usable.
+        // Server is effectively running (another instance)
+        server = srv as unknown as null
+        serverStarting = null
         resolve(PORT)
         return
       }
+      serverStarting = null
       reject(err)
     })
     srv.listen(PORT, '127.0.0.1', () => {
       server = srv
+      serverStarting = null
       console.log(`[Proxy Server] Started on http://127.0.0.1:${PORT}`)
       console.log(`[Proxy Server] Accepting Anthropic SDK requests at http://127.0.0.1:${PORT}/v1/messages`)
       resolve(PORT)

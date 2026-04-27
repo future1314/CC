@@ -150,6 +150,17 @@ export const init = memoize(async (): Promise<void> => {
     logForDebugging('[init] configureGlobalAgents complete')
     profileCheckpoint('init_network_configured')
 
+    // Auto-start the proxy server if CLAUDE_CODE_USE_ADAPTER is set
+    // This ensures the proxy is ready before API calls are made
+    void (async () => {
+      try {
+        const { initAutoProxy } = await import('../utils/autoProxy.js')
+        await initAutoProxy()
+      } catch (err) {
+        logForDebugging(`[init] initAutoProxy failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    })()
+
     // Preconnect to the Anthropic API — overlap TCP+TLS handshake
     // (~100-200ms) with the ~100ms of action-handler work before the API
     // request. After CA certs + proxy agents are configured so the warmed

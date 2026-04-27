@@ -95,12 +95,17 @@ async function handleOpenaiChat(
   const transformed = anthropicToOpenaiChat(body)
   const url = `${baseUrl}/v1/chat/completions`
 
+  // Build headers, only include Authorization if apiKey is non-empty
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`
+  }
+
   const upstream = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify(transformed),
     // Streaming: 5 min timeout (long completions), non-streaming: 5 min timeout
     signal: AbortSignal.timeout(isStream ? 300_000 : 300_000),
@@ -153,12 +158,17 @@ async function handleOpenaiResponses(
   const transformed = anthropicToOpenaiResponses(body)
   const url = `${baseUrl}/v1/responses`
 
+  // Build headers, only include Authorization if apiKey is non-empty
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`
+  }
+
   const upstream = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify(transformed),
     signal: AbortSignal.timeout(isStream ? 300_000 : 300_000),
   })
