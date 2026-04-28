@@ -40,11 +40,10 @@ export async function handleProxyRequest(req: Request, url: URL): Promise<Respon
   }
 
   if (config.apiFormat === 'anthropic') {
-    // Native Anthropic-compatible endpoint — direct connection, no proxy needed
-    return Response.json(
-      { type: 'error', error: { type: 'invalid_request_error', message: 'Anthropic-compatible provider uses direct connection, no proxy needed' } },
-      { status: 400 },
-    )
+    // Native Anthropic-compatible endpoint — forward the request as-is.
+    // Even though no format conversion is needed, we still proxy through
+    // because CLAUDE_CODE_USE_ADAPTER=1 routes all requests here.
+    return await handleAnthropicForward(req, config.baseUrl, config.apiKey)
   }
 
   // Parse request body
@@ -209,4 +208,55 @@ async function handleOpenaiResponses(
   const responseBody = await upstream.json()
   const anthropicResponse = openaiResponsesToAnthropic(responseBody, body.model)
   return Response.json(anthropicResponse)
+}
+
+/**
+ * Handle Anthropic-compatible providers by forwarding the request as-is.
+ * No format conversion needed — the upstream already speaks Anthropic Messages API.
+ */
+async function handleAnthropicForward(
+  req: Request,
+  baseUrl: string,
+  apiKey: string,
+): Promise<Response> {
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`
+
+  // Forward the original request body and most headers
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (apiKey) {
+    headers['x-api-key'] = apiKey
+    headers['Authorization'] = `Bearer ${apiKey}`
+  }
+
+  // Clone the request body
+  const body = await req.text()
+
+  const upstream = await fetch(url, {
+    method: 'POST',
+    headers,
+    body,
+    signal: AbortSignal.timeout(300_000),
+  })
+
+  // For streaming responses, pipe through directly
+  const contentType = upstream.headers.get('content-type') || ''
+  if (contentType.includes('text/event-stream') && upstream.body) {
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    })
+  }
+
+  // Non-streaming: forward the response as-is
+  const responseText = await upstream.text()
+  return new Response(responseText, {
+    status: upstream.status,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }

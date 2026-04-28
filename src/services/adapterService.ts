@@ -319,21 +319,23 @@ class AdapterService {
     const settingsPath = path.join(this.getConfigDir(), 'settings.json')
 
     // Determine the base URL strategy:
-    // - anthropic format: use provider's baseUrl directly (Anthropic-compatible mirror)
+    // - anthropic format: still routes through proxy since CLAUDE_CODE_USE_ADAPTER=1
+    //   is always set. The proxy forwards as-is to the Anthropic-compatible endpoint.
     // - ollama format: needs proxy (Ollama's /v1/chat/completions is OpenAI format,
-    //   not Anthropic Messages format) — point CLI at proxy server
+    //   not Anthropic Messages format) — proxy converts formats
     // - openai_chat/openai_responses: needs proxy for Anthropic→OpenAI conversion
-    const needsProxy = provider.apiFormat !== 'anthropic'
-    // The CLI must talk to the proxy server. The proxy reads the upstream
-    // provider's baseUrl from the adapter config and forwards requests there.
     const proxyPort = 3456
-    const baseUrl = needsProxy ? `http://127.0.0.1:${proxyPort}` : provider.baseUrl
+    const baseUrl = `http://127.0.0.1:${proxyPort}`
 
     const envOverrides: Record<string, string> = {
       ANTHROPIC_BASE_URL: baseUrl,
       ANTHROPIC_AUTH_TOKEN: provider.apiKey,
       ANTHROPIC_MODEL: provider.models.main,
-      CLAUDE_CODE_USE_ADAPTER: needsProxy ? '1' : '',
+      // Always set CLAUDE_CODE_USE_ADAPTER=1 when a third-party provider is
+      // active — this disables Anthropic OAuth login and enables the SDK's
+      // adapter bypass in client.ts. Even for anthropic-compatible formats
+      // that don't need the proxy, we need this flag to skip login.
+      CLAUDE_CODE_USE_ADAPTER: '1',
     }
     if (provider.models.haiku) envOverrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = provider.models.haiku
     if (provider.models.sonnet) envOverrides.ANTHROPIC_DEFAULT_SONNET_MODEL = provider.models.sonnet

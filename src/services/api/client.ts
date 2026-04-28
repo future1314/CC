@@ -298,11 +298,26 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
+  const useAdapter = isEnvTruthy(process.env.CLAUDE_CODE_USE_ADAPTER)
+  const resolvedApiKey = isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey()
+  const resolvedAuthToken = isClaudeAISubscriber()
+    ? getClaudeAIOAuthTokens()?.accessToken
+    : undefined
+
+  // When using the adapter proxy (CLAUDE_CODE_USE_ADAPTER=1), the request
+  // goes to the local proxy server which handles auth with the upstream
+  // provider. The Anthropic SDK requires either an apiKey or authToken to
+  // pass its validateHeaders check, so we provide a placeholder that the
+  // proxy ignores. Setting x-api-key: null in defaultHeaders also tells
+  // the SDK's buildHeaders to put 'x-api-key' in the nulls set, which
+  // satisfies validateHeaders without sending the header on the wire.
+  if (useAdapter && !resolvedApiKey) {
+    defaultHeaders['x-api-key'] = null as unknown as string
+  }
+
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
-    apiKey: isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey(),
-    authToken: isClaudeAISubscriber()
-      ? getClaudeAIOAuthTokens()?.accessToken
-      : undefined,
+    apiKey: useAdapter && !resolvedApiKey ? 'adapter-proxy-placeholder' : resolvedApiKey,
+    authToken: resolvedAuthToken,
     // Set baseURL from OAuth config when using staging OAuth
     ...(process.env.USER_TYPE === 'ant' &&
     isEnvTruthy(process.env.USE_STAGING_OAUTH)
